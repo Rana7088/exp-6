@@ -1,0 +1,287 @@
+exp-6.2
+const express = require('express');
+const jwt = require('jsonwebtoken');
+const app = express();
+const PORT = 3000;
+app.use(express.json());
+const JWT_SECRET = 'your-secret-key-here';
+let userBalance = 1000;
+const users = {
+'user1': 'password123'
+};
+const authMiddleware = (req, res, next) => {
+const authHeader = req.headers.authorization;
+if (!authHeader) {
+return res.status(403).json({
+message: "Invalid or expired token"
+});
+}
+const token = authHeader.split(' ')[1];
+try {
+const decoded = jwt.verify(token, JWT_SECRET);
+req.user = decoded;
+next();
+} catch (error) {
+return res.status(403).json({
+message: "Invalid or expired token"
+});
+}
+};
+app.use((req, res, next) => {
+res.header('Access-Control-Allow-Origin', '*');
+res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+next();
+});
+app.post('/login', (req, res) => {
+const { username, password } = req.body;
+if (users[username] && users[username] === password) {
+const token = jwt.sign(
+{ username: username },
+JWT_SECRET,
+{ expiresIn: '1h' }
+);
+res.json({
+token: token
+});
+} else {
+res.status(401).json({
+message: "Invalid credentials"
+});
+}
+});
+app.get('/balance', authMiddleware, (req, res) => {
+res.json({
+balance: userBalance
+});
+});
+app.post('/deposit', authMiddleware, (req, res) => {
+const { amount } = req.body;
+if (!amount || amount <= 0) {
+return res.status(400).json({
+message: "Invalid amount"
+});
+}
+userBalance += amount;
+res.json({
+message: `Deposited $${amount}`,
+newBalance: userBalance
+});
+});
+app.post('/withdraw', authMiddleware, (req, res) => {
+const { amount } = req.body;
+if (!amount || amount <= 0) {
+return res.status(400).json({
+message: "Invalid amount"
+});
+}
+if (amount > userBalance) {
+return res.status(400).json({
+message: "Insufficient balance"
+});
+}
+userBalance -= amount;
+res.json({
+message: `Withdrew $${amount}`,
+newBalance: userBalance
+});
+});
+app.listen(PORT, () => {
+console.log(`✅ Banking API running on http://localhost:${PORT}`);
+console.log(`📝 Available endpoints:`);
+console.log(`   POST http://localhost:${PORT}/login`);
+console.log(`   GET  http://localhost:${PORT}/balance (Protected)`);
+console.log(`   POST http://localhost:${PORT}/deposit (Protected)`);
+console.log(`   POST http://localhost:${PORT}/withdraw (Protected)`);
+console.log(`\n🔐 Test Credentials: username: "user1", password: "password123"`);
+});
+
+exp-6.3
+const express = require('express');
+const mongoose = require('mongoose');
+const app = express();
+const PORT = 3000;
+app.use(express.json());
+mongoose.connect('mongodb://localhost:27017/bank', {
+useNewUrlParser: true,
+useUnifiedTopology: true
+});
+const userSchema = new mongoose.Schema({
+name: String,
+balance: Number
+});
+const User = mongoose.model('User', userSchema);
+app.use((req, res, next) => {
+res.header('Access-Control-Allow-Origin', '*');
+res.header('Access-Control-Allow-Headers', 'Content-Type');
+next();
+});
+app.post('/create-users', async (req, res) => {
+try {
+await User.deleteMany({});
+const alice = new User({
+name: 'Alice',
+balance: 1000
+});
+const bob = new User({
+name: 'Bob', 
+balance: 500
+});
+await alice.save();
+await bob.save();
+const users = await User.find({});
+res.status(201).json({
+message: "Users created",
+users: users
+});
+} catch (error) {
+res.status(500).json({
+message: "Error creating users",
+error: error.message
+});
+}
+});
+app.post('/transfer', async (req, res) => {
+try {
+const { fromUserId, toUserId, amount } = req.body;
+if (!fromUserId || !toUserId || !amount) {
+return res.status(400).json({
+message: "Missing required fields: fromUserId, toUserId, amount"
+});
+}
+if (amount <= 0) {
+return res.status(400).json({
+message: "Amount must be positive"
+});
+}
+const sender = await User.findById(fromUserId);
+const receiver = await User.findById(toUserId);
+if (!sender) {
+return res.status(404).json({
+message: "Sender account not found"
+});
+}
+if (!receiver) {
+return res.status(404).json({
+message: "Receiver account not found"
+});
+}
+if (sender.balance < amount) {
+return res.status(400).json({
+message: "Insufficient balance"
+});
+}
+sender.balance -= amount;
+receiver.balance += amount;
+await sender.save();
+await receiver.save();
+res.json({
+message: `Transferred $${amount} from ${sender.name} to ${receiver.name}`,
+senderBalance: sender.balance,
+receiverBalance: receiver.balance
+});
+} catch (error) {
+res.status(500).json({
+message: "Transfer failed",
+error: error.message
+});
+}
+});
+app.listen(PORT, () => {
+console.log(`✅ Bank Transfer API running on http://localhost:${PORT}`);
+console.log(`📝 Available endpoints:`);
+console.log(`   POST http://localhost:${PORT}/create-users`);
+console.log(`   POST http://localhost:${PORT}/transfer`);
+});
+
+exp-6.1
+const express = require('express');
+const app = express();
+const PORT = 3000;
+app.use(express.json());
+const loggingMiddleware = (req, res, next) => {
+const timestamp = new Date().toISOString();
+console.log(`[${timestamp}] ${req.method} ${req.url}`);
+next();
+};
+const authMiddleware = (req, res, next) => {
+const authHeader = req.headers.authorization;
+if (!authHeader) {
+return res.status(401).json({
+message: "Authorization header missing or incorrect"
+});
+}
+const token = authHeader.split(' ')[1];
+if (!token || token !== 'mysecrettoken') {
+return res.status(401).json({
+message: "Authorization header missing or incorrect"
+});
+}
+next();
+};
+app.use(loggingMiddleware);
+app.get('/public', (req, res) => {
+res.json({
+message: "This is a public route. No authentication required."
+});
+});
+app.get('/protected', authMiddleware, (req, res) => {
+res.json({
+message: "You have accessed a protected route with a valid Bearer token!"
+});
+});
+let cards = [
+{ id: 1, suit: "Hearts", value: "Ace" },
+{ id: 2, suit: "Spades", value: "King" },
+{ id: 3, suit: "Diamonds", value: "Queen" }
+];
+let nextId = 4;
+app.use((req, res, next) => {
+res.header('Access-Control-Allow-Origin', '*');
+res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+next();
+});
+app.get('/cards', (req, res) => {
+res.json(cards);
+});
+app.get('/cards/:id', (req, res) => {
+const id = parseInt(req.params.id);
+const card = cards.find(c => c.id === id);
+if (card) {
+res.json(card);
+} else {
+res.status(404).json({ error: 'Card not found' });
+}
+});
+app.post('/cards', (req, res) => {
+const { suit, value } = req.body;
+if (!suit || !value) {
+return res.status(400).json({ error: 'Suit and value required' });
+}
+const newCard = {
+id: nextId++,
+suit,
+value
+};
+cards.push(newCard);
+res.status(201).json(newCard);
+});
+app.delete('/cards/:id', (req, res) => {
+const id = parseInt(req.params.id);
+const index = cards.findIndex(c => c.id === id);
+if (index !== -1) {
+cards.splice(index, 1);
+res.json({ message: 'Card deleted successfully' });
+} else {
+res.status(404).json({ error: 'Card not found' });
+}
+});
+app.listen(PORT, () => {
+console.log(`✅ Server running on http://localhost:${PORT}`);
+console.log(`📝 Available endpoints:`);
+console.log(`   PUBLIC: GET  http://localhost:${PORT}/public`);
+console.log(`   PROTECTED: GET  http://localhost:${PORT}/protected (Requires Bearer Token)`);
+console.log(`   CARDS: GET  http://localhost:${PORT}/cards`);
+console.log(`   CARDS: POST http://localhost:${PORT}/cards`);
+console.log(`   CARDS: DELETE http://localhost:${PORT}/cards/:id`);
+console.log(`\n🔐 Test Token: "mysecrettoken"`);
+});
